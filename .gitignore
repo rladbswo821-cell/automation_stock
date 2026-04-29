@@ -1,4 +1,5 @@
 # 인증 토큰 및 자격증명
+.env
 credentials.json
 token.json
 tokens.json
