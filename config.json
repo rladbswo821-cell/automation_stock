@@ -1,0 +1,15 @@
+{
+  "schedule_times": ["08:00", "16:00"],
+  "sheet_name": "자산관리DB",
+  "worksheet": "시트1",
+  "unit_budget": 1000000,
+  "signal": {
+    "rsi_buy": 30,
+    "rsi_sell": 70,
+    "mfi_buy": 30,
+    "mfi_sell": 80,
+    "ma_short": 5,
+    "ma_mid": 20,
+    "ma_long": 60
+  }
+}

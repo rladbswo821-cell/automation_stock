@@ -1,0 +1,21 @@
+# 인증 토큰 및 자격증명
+credentials.json
+token.json
+tokens.json
+kakao_tokens.json
+google_shared_token.json
+*.key
+*.pem
+
+# 로그 파일
+*.txt
+*.log
+logs/
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+
+# 임시 파일
+*.tmp
