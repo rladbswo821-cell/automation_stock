@@ -278,3 +278,48 @@ def generate_ai_insight(portfolio_str: str, macro_str: str, quant_str: str) -> s
         f"🛡️ <b>보수적 배분가</b>\n{conservative}\n\n"
         f"⚖️ <b>실전 액션 플랜</b>\n{action_plan}"
     )
+
+
+# ── 거시경제 한줄평 ──────────────────────────────────────────────────────────
+
+# 임계값 체크: 크거나 같은 첫 번째 threshold 의 comment 적용
+_MACRO_RULES: dict[str, list[tuple[float, str]]] = {
+    "KRW=X":     [(1400, "수입물가 상승 우려"), (1350, "평년 수준 유지"), (0, "수입물가 호조")],
+    "^GSPC":     [(5500, "시장 과열 우려"),     (5000, "평년 수준"),     (0, "회피 심리 진행")],
+    "^KS11":     [(2800, "외국인 수급 양호"),   (2600, "평년 수준"),     (0, "외국인 심한 매도")],
+    "^TNX":      [(4.5,  "기술주 하방 압력 강화"), (4.0, "금리 부담 구간"), (0, "금리 안정")],
+    "^TYX":      [(4.5,  "장기금리 상승"),      (4.0, "평년 수준"),      (0, "경기 약세 신호")],
+    "^VIX":      [(30,   "시장 공포 심화"),     (20,  "변동성 증가 주의"), (0, "시장 안정")],
+    "CL=F":      [(100,  "인플레이션 재점화"),  (80,  "평년 수준"),       (0, "경기 둔화 신호")],
+    "DX-Y.NYB":  [(105,  "글로벌 강달러 지속"), (100, "평년 수준"),       (0, "달러 약세 진행")],
+}
+
+_MACRO_LABELS: dict[str, str] = {
+    "KRW=X": "환율", "^GSPC": "S&P500", "^KS11": "KOSPI",
+    "^TNX": "미10년물", "^TYX": "미30년물", "^VIX": "VIX",
+    "CL=F": "유가", "DX-Y.NYB": "달러인덱스",
+}
+
+
+def generate_macro_interpretation(ticker: str, current_value: float) -> str:
+    """규칙 기반 거시경제 지표 한줄평 반환"""
+    label = _MACRO_LABELS.get(ticker, ticker)
+    for threshold, comment in _MACRO_RULES.get(ticker, []):
+        if current_value >= threshold:
+            return f"  └ {label} {current_value:.1f} → {comment}"
+    return f"  └ {label} {current_value:.1f} → 분석 불가"
+
+
+def generate_summary_insight(
+    portfolio_summary: str, signal_summary: str, macro_summary: str
+) -> str:
+    """섹션1·3·4 요약을 받아 단일 Gemini 호출로 3~5문장 종합 의견 생성"""
+    prompt = (
+        "당신은 금융 자산관리 전문가입니다. 아래 포트폴리오·기술신호·거시지표를 종합하여 "
+        "3~5문장의 실전 조언을 제시하세요. 구체적 종목명과 수치를 인용하되 과장 없이 객관적으로.\n"
+        "[경고] 인사말·서론·구분선 없이 본론만 즉시 출력하세요.\n\n"
+        f"[포트폴리오]\n{portfolio_summary}\n\n"
+        f"[기술신호]\n{signal_summary}\n\n"
+        f"[거시경제]\n{macro_summary}"
+    )
+    return _call_gemini(prompt) or "• 분석 생성 실패"

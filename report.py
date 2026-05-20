@@ -7,11 +7,12 @@ from datetime import datetime
 
 from data_fetch import (
     map_ticker, get_advanced_technicals,
-    get_macro_dwmy, fetch_news_raw,
+    get_macro_dwmy, get_macro_value_only,
 )
 from analysis import (
     grade_signal, calc_order, format_quant_line,
-    generate_ai_news_summary, generate_ai_insight,
+    generate_macro_interpretation,
+    generate_summary_insight,
 )
 
 
@@ -40,20 +41,37 @@ def safe_float(val) -> float:
         return 0.0
 
 
+# ── 거시경제 지표 목록 ────────────────────────────────────────────────────────
+
+# (ticker, is_curr, emoji) 순서
+_MACRO_TICKERS: list[tuple[str, bool, str]] = [
+    ("KRW=X",    True,  "💵"),
+    ("^GSPC",    False, "📈"),
+    ("^KS11",    False, "🇰🇷"),
+    ("^TNX",     False, "🏛️"),
+    ("^TYX",     False, "🏛️"),
+    ("^VIX",     False, "😨"),
+    ("CL=F",     False, "🛢️"),
+    ("DX-Y.NYB", False, "💰"),
+]
+
+
 # ── 리포트 조립 ───────────────────────────────────────────────────────────────
 
 def build_report(records: list[dict], usd_krw: float) -> tuple[str, str]:
     """
     Google Sheets 레코드 + 환율 → 전체 HTML 리포트 문자열 반환.
-    섹션 구성: 주목종목 / 1계좌 / 2종목 / 3분석 / 4거시 / 5뉴스 / 6AI제안
+    섹션 구성: 1구분별자산 / 3매수매도종목 / 4거시경제+한줄평 / 6종합의견
     """
     current_date = datetime.now().strftime("%m/%d")
     total_val    = sum(safe_float(r.get('평가금액', 0)) for r in records)
-    acc_map, stock_data, quant_lines, watch_lines, holdings_news = {}, [], [], [], []
+    acc_map: dict[str, float] = {}
+    quant_lines: list[str]    = []
 
     for r in records:
         name = str(r.get('종목명', '')).strip()
-        acc  = str(r.get('계좌', '일반')).strip()
+        # '구분'(A열) 우선 사용, 없으면 '계좌', 그것도 없으면 '기타'
+        acc  = str(r.get('구분', r.get('계좌', '기타'))).strip()
         val  = safe_float(r.get('평가금액', 0))
         if not name or val == 0:
             continue
@@ -61,31 +79,22 @@ def build_report(records: list[dict], usd_krw: float) -> tuple[str, str]:
         if not any(k in name for k in ['현금', '예금', '대기자금']):
             buy         = safe_float(r.get('매입가', r.get('평균단가', 0)))
             cur         = safe_float(r.get('현재가', 0))
-            y_rate      = ((cur / buy) - 1) * 100 if buy > 0 else 0
             current_qty = int(safe_float(r.get('수량', 0)))
-            stock_data.append({'name': name, 'val_m': val / 1000000, 'yield': y_rate})
-            if any(k in acc for k in ['해외주식', '국내주식', '연금저축', 'IRP']):
-                holdings_news.append(name)
             # 기술지표 → 복합 등급 + 매수/매도 주문 계산
+            # score >= 2(매수권장 이상) 또는 score <= -1(매도주의 이상)만 포함
             tk   = map_ticker(name)
             tech = get_advanced_technicals(tk)
             if tech:
                 sig   = grade_signal(tech)
                 order = calc_order(tech, sig, usd_krw, current_qty)
-                if sig["grade"] != "중립":
+                if sig["score"] >= 2 or sig["score"] <= -1:
                     quant_lines.append(format_quant_line(name, tech, sig, order))
-                    badge_str = f" {sig['badge']}" if sig["badge"] else ""
-                    watch_lines.append(
-                        f"{sig['color']} <b>{name[:10]}</b>  {sig['grade']}{badge_str}"
-                    )
 
-    # 제목 + 주목 종목 요약
+    # 제목
     msg = f"📋 <b>[ {current_date} 자산관리 리포트 ]</b>\n\n"
-    if watch_lines:
-        msg += "📌 <b>주목 종목</b>\n" + "\n".join(watch_lines) + "\n\n"
 
-    # 섹션 1: 계좌별 자산
-    msg += f"<b>1️⃣ 계좌별 자산 [{total_val/1000000:,.1f}백만원] (점유율)</b>\n<pre>"
+    # 섹션 1: 구분별 자산 ('구분' 열 기준)
+    msg += f"<b>1️⃣ 구분별 자산 [{total_val/1000000:,.1f}백만원] (점유율)</b>\n<pre>"
     for a, v in sorted(acc_map.items(), key=lambda x: x[1], reverse=True):
         msg += (
             f"🏦 {pad_str(a[:6], 10, 'left')}"
@@ -94,27 +103,11 @@ def build_report(records: list[dict], usd_krw: float) -> tuple[str, str]:
         )
     msg += "</pre>\n"
 
-    # 섹션 2: 종목 수익률
-    stock_val_sum = sum(s['val_m'] for s in stock_data)
-    total_y = (
-        sum(s['yield'] * s['val_m'] for s in stock_data) / stock_val_sum
-        if stock_val_sum > 0 else 0
-    )
-    msg += f"<b>2️⃣ 주식 종목 현황 [{stock_val_sum:,.1f}백만원] ({total_y:+.1f}%)</b>\n<pre>"
-    for s in sorted(stock_data, key=lambda x: x['yield'], reverse=True):
-        val_m_str = f"{s['val_m']:.1f}"
-        msg += (
-            f"🏦 {pad_str(s['name'][:12], 12, 'left')}"
-            f" {pad_str(val_m_str, 7)}백만원"
-            f" ({s['yield']:+.1f}%)\n"
-        )
-    msg += "</pre>\n"
-
-    # 섹션 3: 복합 투자 등급
+    # 섹션 3: 매수/매도 필요 종목
     if quant_lines:
-        msg += "<b>3️⃣ 종목분석</b>\n" + "\n".join(quant_lines) + "\n"
+        msg += "<b>3️⃣ 매수/매도 필요 종목</b>\n" + "\n".join(quant_lines) + "\n"
     else:
-        msg += "<b>3️⃣ 종목분석</b>\n• 특이사항 없음\n"
+        msg += "<b>3️⃣ 매수/매도 필요 종목</b>\n• 특이사항 없음\n"
     msg += (
         "\n<i>💡 [지표 가이드]</i>\n"
         "- RSI (심리/ 30↓:매수★, 70↑:매도▼)\n"
@@ -125,30 +118,32 @@ def build_report(records: list[dict], usd_krw: float) -> tuple[str, str]:
         "- 🛒 매수가이드: 예산100만원 기준 / 💰 매도가이드: 보유수량 기준\n"
     )
 
-    # 섹션 4: 거시경제 지표
+    # 섹션 4: 거시경제 지표 + 규칙 기반 한줄평
     msg += "\n<b>4️⃣ 핵심 경제 지표 (D/W/M/Y)</b>\n"
-    msg += (
-        f"💵 환율: {get_macro_dwmy('KRW=X', True)}\n"
-        f"📈 S&P500: {get_macro_dwmy('^GSPC')}\n"
-        f"🇰🇷 KOSPI: {get_macro_dwmy('^KS11')}\n"
-        f"🏛️ 미10년물: {get_macro_dwmy('^TNX')}\n"
-        f"🏛️ 미30년물: {get_macro_dwmy('^TYX')}\n"
-        f"😨 VIX공포: {get_macro_dwmy('^VIX')}\n"
-        f"🛢️ 유가(WTI): {get_macro_dwmy('CL=F')}\n"
-        f"💰 달러인덱스: {get_macro_dwmy('DX-Y.NYB')}\n"
-    )
+    macro_summaries: list[str] = []
+    for ticker, is_curr, emoji in _MACRO_TICKERS:
+        dwmy_str = get_macro_dwmy(ticker, is_curr)
+        msg += f"{emoji} {dwmy_str}\n"
+        val = get_macro_value_only(ticker)
+        if val is not None:
+            interp = generate_macro_interpretation(ticker, val)
+            msg += f"{interp}\n"
+            macro_summaries.append(interp.strip())
+        msg += "\n"
 
-    # 섹션 5: 종목 뉴스 (RSS → Gemini 요약)
-    raw_news = fetch_news_raw(list(set(holdings_news)))
-    msg += "\n<b>5️⃣ 종목별 소식</b>\n" + generate_ai_news_summary(raw_news) + "\n"
-
-    # 섹션 6: AI 종합 분석 (별도 메시지로 분리)
-    insight_msg = (
-        "\n<b>6️⃣ 종합 분석 및 제안</b>\n"
-        + generate_ai_insight(
-            str(stock_data),
-            msg.split('4️⃣')[1].split('5️⃣')[0],
-            str(quant_lines),
+    # 섹션 6: 단일 Gemini 호출 종합 의견
+    portfolio_summary = (
+        f"총자산 {total_val/1000000:,.1f}백만원 | "
+        + " / ".join(
+            f"{a} {v/total_val*100:.0f}%"
+            for a, v in sorted(acc_map.items(), key=lambda x: x[1], reverse=True)
         )
+    )
+    signal_summary = "\n".join(quant_lines) if quant_lines else "매수/매도 신호 없음"
+    macro_summary  = " | ".join(macro_summaries[:5])
+
+    insight_msg = (
+        f"<b>6️⃣ 종합 분석 및 제안</b>\n"
+        + generate_summary_insight(portfolio_summary, signal_summary, macro_summary)
     )
     return msg, insight_msg

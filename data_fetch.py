@@ -144,6 +144,20 @@ def get_macro_dwmy(ticker: str, is_curr: bool = False) -> str:
         return "N/A"
 
 
+def get_macro_value_only(ticker: str) -> float | None:
+    """거시경제 지표 현재값(숫자)만 반환. 실패 시 None."""
+    try:
+        hist = _call_with_retry(
+            lambda: yf.Ticker(ticker).history(period="5d"),
+            delays=(5,),
+        )
+        if hist.empty:
+            return None
+        return float(hist['Close'].iloc[-1])
+    except Exception:
+        return None
+
+
 def fetch_usd_krw() -> float:
     """실시간 USD/KRW 환율 반환 (yfinance KRW=X, 실패 시 1350.0 fallback)"""
     try:

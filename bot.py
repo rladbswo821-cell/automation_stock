@@ -16,7 +16,11 @@ from report import build_report
 def log_msg(msg: str) -> None:
     """타임스탬프와 함께 콘솔 및 로그 파일에 기록"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] {msg}")
+    try:
+        # cp949 콘솔에서 이모지 출력 불가 시 무시
+        print(f"[{timestamp}] {msg}")
+    except UnicodeEncodeError:
+        pass
     with open("asset_master_log.txt", "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] {msg}\n")
 
@@ -54,7 +58,8 @@ def process_asset_db() -> None:
         records = fetch_sheet_records()
         main_msg, insight_msg = build_report(records, usd_krw)
         send_telegram_msg(main_msg)
-        send_telegram_msg(insight_msg)
+        if insight_msg:  # 비어 있으면 전송 생략
+            send_telegram_msg(insight_msg)
 
     except TokenExpiredError:
         alert = "🔑 <b>Google OAuth 토큰 만료</b>\nrenew_token.py 를 실행하여 재인증해주세요."
