@@ -114,30 +114,34 @@ def calc_order(
     """
     is_buy  = sig["score"] > 0
     is_sell = sig["score"] < 0
-    close   = tech.get("close_price", 0.0)
+    # NaN/None 방어: 가격 데이터가 누락된 종목은 0으로 처리
+    raw_close = tech.get("close_price", 0.0)
+    close = 0.0 if (raw_close is None or (isinstance(raw_close, float) and math.isnan(raw_close))) else float(raw_close)
 
     # ── 매수 계산 ──────────────────────────────────────────
     if is_buy and tech.get("bb") == "하단이탈(투매)":
-        target_price = tech.get("bb_lower", close)
+        raw_lower    = tech.get("bb_lower", close)
+        target_price = close if (raw_lower is None or (isinstance(raw_lower, float) and math.isnan(raw_lower))) else float(raw_lower)
         order_type   = "지정가"
     else:
         target_price = close
         order_type   = "시장가"
 
     qty      = math.floor(UNIT_BUDGET / usd_krw / target_price) if target_price > 0 else 0
-    cost_krw = round(qty * target_price * usd_krw)
+    cost_krw = round(qty * target_price * usd_krw) if target_price > 0 else 0
 
     # ── 매도 계산 ──────────────────────────────────────────
     # 목표가: BB 상단가와 현재가+2% 중 높은 쪽을 지정가로 설정
-    bb_upper     = tech.get("bb_upper", close)
-    sell_target  = round(max(bb_upper, close * 1.02), 2)
+    raw_upper = tech.get("bb_upper", close)
+    bb_upper  = close if (raw_upper is None or (isinstance(raw_upper, float) and math.isnan(raw_upper))) else float(raw_upper)
+    sell_target  = round(max(bb_upper, close * 1.02), 2) if close > 0 else 0.0
 
     match sig["grade"]:
         case "매도 권장":    sell_qty = current_holdings                          # 전량
         case "매도 주의":    sell_qty = math.ceil(current_holdings * 0.5)         # 50%
         case _:              sell_qty = 0
 
-    revenue_krw = round(sell_qty * sell_target * usd_krw)
+    revenue_krw = round(sell_qty * sell_target * usd_krw) if sell_target > 0 else 0
 
     return {
         "is_buy":       is_buy,
