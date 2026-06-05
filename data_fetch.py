@@ -191,6 +191,39 @@ def fetch_sheet_records() -> list[dict]:
         raise TokenExpiredError("Google OAuth 토큰 완전 만료 (renew_token.py 실행 필요)") from e
 
 
+# 거시경제 지표별 Google News 검색 키워드
+_MACRO_NEWS_QUERY: dict[str, str] = {
+    "KRW=X":    "달러 원 환율",
+    "^GSPC":    "S&P500",
+    "^KS11":    "코스피",
+    "^TNX":     "미국 10년 국채금리",
+    "^TYX":     "미국 30년 국채금리",
+    "^VIX":     "VIX 공포지수",
+    "CL=F":     "국제 유가",
+    "DX-Y.NYB": "달러 인덱스",
+}
+
+
+def fetch_macro_news(ticker: str) -> list[str]:
+    """거시경제 지표 관련 Google News RSS 헤드라인 최대 2개 반환"""
+    query = _MACRO_NEWS_QUERY.get(ticker, ticker)
+    try:
+        url = (
+            f"https://news.google.com/rss/search?"
+            f"q={urllib.parse.quote(query)}&hl=ko&gl=KR&ceid=KR:ko"
+        )
+        req  = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        root = ET.fromstring(urllib.request.urlopen(req, timeout=5).read())
+        headlines = []
+        for item in root.findall('./channel/item')[:2]:
+            title = item.find('title')
+            if title is not None and title.text:
+                headlines.append(title.text.strip())
+        return headlines
+    except Exception:
+        return []
+
+
 def fetch_news_raw(holdings_news: list[str]) -> str:
     """보유 종목 목록으로 Google News RSS 크롤링 → 원문 텍스트 반환"""
     raw = ""
